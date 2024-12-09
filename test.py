@@ -23,6 +23,79 @@ app.resizable(False, False)
 display = customtkinter.CTkFrame(master=app, width=900, height=220, corner_radius=10)
 display.place(relx=0.5, rely=0.22, anchor="center")
 
+# EQ xử lý tín hiệu theo thời gian thực
+def apply_eq(audio_data, fs):
+    """Áp dụng EQ với bộ lọc bandpass và gain từ sliders."""
+    global sliders, frequencies
+    processed_data = np.zeros_like(audio_data)
+    for i, freq in enumerate(frequencies):
+        # Tính toán tần số cắt
+        lowcut = max(0, freq / np.sqrt(2))
+        highcut = min(fs / 2, freq * np.sqrt(2))
+        
+        # Kiểm tra nếu lowcut và highcut hợp lệ
+        if lowcut <= 0 or highcut >= fs / 2 or lowcut >= highcut:
+            continue  # Bỏ qua bộ lọc không hợp lệ
+
+        gain = sliders[i].get()
+
+        # Tạo bộ lọc thông dải
+        sos = signal.butter(2, [lowcut / (fs / 2), highcut / (fs / 2)], btype='band', output='sos')
+        filtered = signal.sosfilt(sos, audio_data)
+
+        # Áp dụng gain
+        processed_data += filtered * (10 ** (gain / 20))  # Chuyển đổi từ dB sang tỷ lệ tuyến tính
+    return processed_data
+
+
+def apply_eq_to_audio():
+    """Áp dụng EQ cho file âm thanh đang phát."""
+    global sliders, list_var
+
+    # Đường dẫn tới file hiện tại
+    selected_file = list_var.get()
+    file_path = os.path.join('D:/Workspace/DSP/audio', selected_file)
+
+    if not os.path.exists(file_path):
+        messagebox.showerror("Error", "File not found!")
+        return
+
+    # Đọc dữ liệu âm thanh từ file
+    try:
+        with wave.open(file_path, 'rb') as wf:
+            sample_rate = wf.getframerate()
+            num_channels = wf.getnchannels()
+            num_frames = wf.getnframes()
+
+            # Lấy dữ liệu dạng numpy array
+            audio_data = np.frombuffer(wf.readframes(num_frames), dtype=np.int16)
+            audio_data = audio_data / 32768.0  # Chuyển đổi về [-1, 1]
+            if num_channels == 2:
+                audio_data = audio_data.reshape((-1, 2))
+
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to read file: {e}")
+        return
+
+    # Áp dụng EQ cho từng kênh
+    processed_data = np.zeros_like(audio_data)
+    for channel in range(num_channels):
+        processed_data[:, channel] = apply_eq(audio_data[:, channel], sample_rate)
+
+    # Ghi âm thanh đã xử lý thành file tạm
+    processed_data = (processed_data * 32768).astype(np.int16)
+    temp_file_path = 'D:/Workspace/DSP/temp_eq.wav'
+    with wave.open(temp_file_path, 'wb') as wf:
+        wf.setnchannels(num_channels)
+        wf.setsampwidth(2)  # 2 byte (16 bit) mỗi mẫu
+        wf.setframerate(sample_rate)
+        wf.writeframes(processed_data.tobytes())
+
+    # Phát lại âm thanh từ file tạm
+    pygame.mixer.music.load(temp_file_path)
+    pygame.mixer.music.play()
+
+
 # Audio list
 def getFiles(folder_path):    
     audio_files = [f for f in os.listdir(folder_path) if f.endswith((".mp3", ".wav"))]
@@ -142,21 +215,6 @@ stop = customtkinter.CTkButton(master=app, width=30, text="Stop", command=stop_f
 stop.grid(row = 0, column = 3, padx=20, pady=(260,0))
 
 # Mode list
-def mode_callback(selected_mode):
-    global audio_files, sample
-    # Đồng bộ sliders với mode
-    update_sliders(selected_mode)
-    
-    # Lấy giá trị từ sliders
-    gains = [slider.get() for slider in sliders]
-    
-    # Áp dụng equalizer
-    equalized_audio = equalize_audio(audio_data, sample_rate, gains)
-    
-    # Phát lại âm thanh đã xử lý
-    play_equalized_audio(equalized_audio, sample_rate)
-
-
 def update_sliders(mode):
     """Cập nhật giá trị của các slider theo chế độ."""
     global sliders
@@ -169,59 +227,6 @@ def update_sliders(mode):
         if i < len(values):
             slider.set(values[i])
 
-
-def equalize_audio(audio_data, sample_rate, gains):
-    """
-    Áp dụng equalizer trên audio_data dựa vào sliders.
-    - audio_data: Mảng âm thanh đầu vào (numpy array).
-    - sample_rate: Tần số lấy mẫu.
-    - gains: Giá trị tăng giảm (dB) cho mỗi dải tần số.
-
-    Trả về:
-    - audio_data_equalized: Dữ liệu âm thanh đã được áp dụng equalizer.
-    """
-    # Dải tần số tương ứng với 31 sliders
-    global frequencies
-
-    # Dữ liệu kết quả sau khi áp dụng equalizer
-    audio_data_equalized = np.zeros_like(audio_data)
-
-    # Áp dụng bộ lọc từng dải tần số
-    for i, gain in enumerate(gains):
-        # Tạo bộ lọc thông dải cho dải tần tương ứng
-        f1 = frequencies[i]
-        f2 = frequencies[i+1] if i+1 < len(frequencies) else frequencies[i]*1.5
-        b, a = signal.iirfilter(2, [f1/(sample_rate/2), f2/(sample_rate/2)], 
-                                btype='band', ftype='butter')
-        
-        # Lọc tín hiệu và nhân hệ số gain (chuyển từ dB sang tỷ lệ)
-        filtered = signal.lfilter(b, a, audio_data)
-        audio_data_equalized += filtered * (10 ** (gain / 20))
-    
-    # Chuẩn hóa dữ liệu để tránh vượt quá biên độ
-    audio_data_equalized = np.clip(audio_data_equalized, -1.0, 1.0)
-    return audio_data_equalized
-
-def play_equalized_audio(audio_data, sample_rate):
-    """
-    Phát âm thanh đã được xử lý.
-    - audio_data: Dữ liệu âm thanh (numpy array).
-    - sample_rate: Tần số lấy mẫu.
-    """
-    if audio_data is not None:
-        sd.stop()  # Dừng phát trước đó
-        sd.play(audio_data, samplerate=sample_rate)
-
-def slider_callback(index):
-    global audio_data, sample_rate
-    # Lấy giá trị từ sliders
-    gains = [slider.get() for slider in sliders]
-    
-    # Áp dụng equalizer
-    equalized_audio = equalize_audio(audio_data, sample_rate, gains)
-    
-    # Phát lại âm thanh đã xử lý
-    play_equalized_audio(equalized_audio, sample_rate)
 
 modes = ["Flat", "Rock", "Pop", "Bass", "Treble", "Vocal", "Classical",
          "Hip-hop", "Dance", "Jazz", "Powerfull", "MUU"]
@@ -241,6 +246,11 @@ slider_modes = {
     "MUU": [-12, -3, 4, 12, 6, 3, 6, 12, 4, -3, -12, 12, 3, -5, -9, -11, -11, -9, -5, 3, 12, 12, 3, -5, -9, -11, -11, -9, -5, 3, 12]
 }
 
+def mode_callback(selected_mode):
+    """Đồng bộ sliders với chế độ và áp dụng EQ."""
+    update_sliders(selected_mode)  # Cập nhật sliders theo mode
+    apply_eq_to_audio()  # Áp dụng EQ ngay lập tức
+
 mode_var = customtkinter.StringVar(value="Select 1 mode below")
 mode = customtkinter.CTkOptionMenu(app, values=modes,
                                         width=150,
@@ -248,6 +258,8 @@ mode = customtkinter.CTkOptionMenu(app, values=modes,
                                         variable=mode_var)
 mode.grid(row = 0, column = 4, padx=30, pady=(260,0))
 
+# Kết nối callback mode với menu
+mode.configure(command=mode_callback)
 
 # Record button
 isRecording = False
@@ -344,7 +356,5 @@ for i, freq in enumerate(frequencies):
     label = customtkinter.CTkLabel(master=slider_frame, text=labels[i], fg_color="transparent")
     label.grid(row=1, column=i,padx=4)
     labels.append(label)
-
-    slider.configure(command=lambda value, index=i: slider_callback(index, value))
 
 app.mainloop()
