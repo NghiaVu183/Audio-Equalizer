@@ -6,6 +6,7 @@ import scipy.signal as signal
 import sounddevice as sd
 from tkinter import messagebox
 import os
+from pydub import AudioSegment
 
 pygame.mixer.init()
 
@@ -48,11 +49,13 @@ def apply_eq(audio_data, fs):
     return processed_data
 
 
-def apply_eq_to_audio():
-    """Áp dụng EQ cho file âm thanh đang phát."""
-    global sliders, list_var
+current_position = 0  # Thời gian hiện tại của âm thanh (ms)
+stream = None
 
-    # Đường dẫn tới file hiện tại
+def apply_eq_realtime():
+    """Xử lý và phát lại âm thanh theo EQ trong thời gian thực."""
+    global list_var, current_position, isPlaying, stream
+
     selected_file = list_var.get()
     file_path = os.path.join('D:/Workspace/DSP/Audio-Equalizer/audio', selected_file)
 
@@ -60,40 +63,44 @@ def apply_eq_to_audio():
         messagebox.showerror("Error", "File not found!")
         return
 
-    # Đọc dữ liệu âm thanh từ file
-    try:
-        with wave.open(file_path, 'rb') as wf:
-            sample_rate = wf.getframerate()
-            num_channels = wf.getnchannels()
-            num_frames = wf.getnframes()
+    # Tạm dừng nhạc và lấy vị trí hiện tại
+    if isPlaying:
+        pygame.mixer.music.pause()
+        current_position = pygame.mixer.music.get_pos()
 
-            # Lấy dữ liệu dạng numpy array
-            audio_data = np.frombuffer(wf.readframes(num_frames), dtype=np.int16)
-            audio_data = audio_data / 32768.0  # Chuyển đổi về [-1, 1]
-            if num_channels == 2:
-                audio_data = audio_data.reshape((-1, 2))
+    # Đọc file âm thanh
+    audio = AudioSegment.from_file(file_path)
+    audio = audio.set_frame_rate(44100).set_channels(1)  # Đảm bảo mono để xử lý dễ dàng
+    audio_array = np.array(audio.get_array_of_samples(), dtype=np.float32)
+    audio_array = audio_array / 32768.0  # Chuyển đổi về [-1, 1]
 
-    except Exception as e:
-        messagebox.showerror("Error", f"Failed to read file: {e}")
-        return
+    # Áp dụng EQ
+    fs = audio.frame_rate
+    processed_audio = apply_eq(audio_array, fs)
 
-    # Áp dụng EQ cho từng kênh
-    processed_data = np.zeros_like(audio_data)
-    for channel in range(num_channels):
-        processed_data[:, channel] = apply_eq(audio_data[:, channel], sample_rate)
+    # Phát lại tín hiệu từ vị trí hiện tại
+    start_sample = int((current_position / 1000) * fs)
+    playback_audio = processed_audio[start_sample:]
 
-    # Ghi âm thanh đã xử lý thành file tạm
-    processed_data = (processed_data * 32768).astype(np.int16)
-    temp_file_path = 'D:/Workspace/DSP/Audio-Equalizer/temp_eq.wav'
-    with wave.open(temp_file_path, 'wb') as wf:
-        wf.setnchannels(num_channels)
-        wf.setsampwidth(2)  # 2 byte (16 bit) mỗi mẫu
-        wf.setframerate(sample_rate)
-        wf.writeframes(processed_data.tobytes())
+    # Dừng luồng âm thanh hiện tại (nếu có)
+    if stream and stream.active:
+        stream.stop()
+        stream.close()
 
-    # Phát lại âm thanh từ file tạm
-    pygame.mixer.music.load(temp_file_path)
-    pygame.mixer.music.play()
+    # Chạy phát lại bằng sounddevice
+    def callback(outdata, frames, time, status):
+        nonlocal playback_audio
+        if len(playback_audio) < frames:
+            outdata[:len(playback_audio)] = playback_audio[:, np.newaxis]
+            outdata[len(playback_audio):] = 0
+            playback_audio = np.array([])  # Hết dữ liệu
+        else:
+            outdata[:] = playback_audio[:frames, np.newaxis]
+            playback_audio = playback_audio[frames:]
+
+    # Tạo luồng âm thanh mới
+    stream = sd.OutputStream(samplerate=fs, channels=1, callback=callback)
+    stream.start()
 
 
 # Audio list
@@ -249,7 +256,7 @@ slider_modes = {
 def mode_callback(selected_mode):
     """Đồng bộ sliders với chế độ và áp dụng EQ."""
     update_sliders(selected_mode)  # Cập nhật sliders theo mode
-    apply_eq_to_audio()  # Áp dụng EQ ngay lập tức
+    apply_eq_realtime()  # Áp dụng EQ ngay lập tức
 
 mode_var = customtkinter.StringVar(value="Select 1 mode below")
 mode = customtkinter.CTkOptionMenu(app, values=modes,
