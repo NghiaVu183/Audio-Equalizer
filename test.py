@@ -15,7 +15,7 @@ customtkinter.deactivate_automatic_dpi_awareness()
 
 app = customtkinter.CTk()  # create CTk window
 app.title("Audio Equalizer")
-app.iconbitmap('D:/Workspace/DSP/images/icon.ico')
+app.iconbitmap('D:/Workspace/DSP/Audio-Equalizer/images/icon.ico')
 app.geometry("1000x600")
 app.resizable(False, False)
 
@@ -54,7 +54,7 @@ def apply_eq_to_audio():
 
     # Đường dẫn tới file hiện tại
     selected_file = list_var.get()
-    file_path = os.path.join('D:/Workspace/DSP/audio', selected_file)
+    file_path = os.path.join('D:/Workspace/DSP/Audio-Equalizer/audio', selected_file)
 
     if not os.path.exists(file_path):
         messagebox.showerror("Error", "File not found!")
@@ -84,7 +84,7 @@ def apply_eq_to_audio():
 
     # Ghi âm thanh đã xử lý thành file tạm
     processed_data = (processed_data * 32768).astype(np.int16)
-    temp_file_path = 'D:/Workspace/DSP/temp_eq.wav'
+    temp_file_path = 'D:/Workspace/DSP/Audio-Equalizer/temp_eq.wav'
     with wave.open(temp_file_path, 'wb') as wf:
         wf.setnchannels(num_channels)
         wf.setsampwidth(2)  # 2 byte (16 bit) mỗi mẫu
@@ -113,11 +113,11 @@ def getDuration(file_path):
         return "00:00"
 
 def list_callback(choice):
-    file_path = os.path.join('D:/Workspace/DSP/audio', choice)
+    file_path = os.path.join('D:/Workspace/DSP/Audio-Equalizer/audio', choice)
     getDuration(file_path)
 
 
-audio_files = getFiles(folder_path='D:/Workspace/DSP/audio')
+audio_files = getFiles(folder_path='D:/Workspace/DSP/Audio-Equalizer/audio')
 list_var = customtkinter.StringVar(value="Select 1 audio file below")
 list = customtkinter.CTkOptionMenu(app, values=audio_files,
                                         width=300,
@@ -167,7 +167,7 @@ def play_pause_func():
 
     # Đường dẫn tới file đã chọn
     selected_file = list_var.get()
-    file_path = os.path.join('D:/Workspace/DSP/audio', selected_file)
+    file_path = os.path.join('D:/Workspace/DSP/Audio-Equalizer/audio', selected_file)
 
     if not os.path.exists(file_path):
         messagebox.showerror("Error", "Selected file not found!")
@@ -300,7 +300,7 @@ def save_recording():
     audio_array = np.concatenate(rec_data, axis=0)
 
     # Ghi âm thanh thành file .wav
-    output_path = "D:/Workspace/DSP/recorded.wav"
+    output_path = "D:/Workspace/DSP/Audio-Equalizer/recorded.wav"
     with wave.open(output_path, 'wb') as wf:
         wf.setnchannels(2)  # 2 kênh (stereo)
         wf.setsampwidth(2)  # Mỗi mẫu 2 byte
